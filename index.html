@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>THE BUTTON IS LYING</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="game-container">
+        <!-- Header -->
+        <div id="header">
+            <div class="score-display">
+                <div class="stat">
+                    <span class="label">SCORE</span>
+                    <span id="score" class="value">0</span>
+                </div>
+                <div class="stat">
+                    <span class="label">COMBO</span>
+                    <span id="combo" class="value">0</span>
+                </div>
+                <div class="stat">
+                    <span class="label">LIVES</span>
+                    <span id="lives" class="value">3</span>
+                </div>
+                <div class="stat">
+                    <span class="label">BEST</span>
+                    <span id="best-score" class="value">0</span>
+                </div>
+            </div>
+            <button id="mute-btn" class="mute-btn">🔊</button>
+        </div>
+
+        <!-- Main game area -->
+        <div id="game-area">
+            <!-- Welcome screen -->
+            <div id="welcome-screen" class="screen active">
+                <div class="welcome-content">
+                    <h1>THE BUTTON</h1>
+                    <h1 style="color: #ff00ff; margin-top: -20px;">IS LYING</h1>
+                    <p class="subtitle">Read the instruction. Find the correct button. Click it.</p>
+                    <p class="subtitle" style="font-size: 14px; margin-top: 30px; opacity: 0.7;">But the game deliberately tries to trick you.</p>
+                    <button id="start-btn" class="play-btn">START GAME</button>
+                </div>
+            </div>
+
+            <!-- Game screen -->
+            <div id="game-screen" class="screen">
+                <!-- Round indicator -->
+                <div id="round-indicator" class="round-indicator">
+                    <span id="round-number">Round 1</span>
+                </div>
+
+                <!-- Instruction area -->
+                <div id="instruction-area" class="instruction-area">
+                    <div id="instruction" class="instruction"></div>
+                    <div id="timer-display" class="timer-display">
+                        <div id="timer-bar" class="timer-bar"></div>
+                    </div>
+                </div>
+
+                <!-- Buttons container -->
+                <div id="buttons-container" class="buttons-container"></div>
+
+                <!-- Feedback -->
+                <div id="feedback" class="feedback"></div>
+            </div>
+
+            <!-- Game Over screen -->
+            <div id="gameover-screen" class="screen">
+                <div class="gameover-content">
+                    <h2>GAME OVER</h2>
+                    <div class="final-stats">
+                        <div class="stat-line">
+                            <span>Final Score:</span>
+                            <span id="final-score">0</span>
+                        </div>
+                        <div class="stat-line">
+                            <span>Best Score:</span>
+                            <span id="gameover-best">0</span>
+                        </div>
+                        <div class="stat-line">
+                            <span>Combo Reached:</span>
+                            <span id="final-combo">0</span>
+                        </div>
+                    </div>
+                    <button id="restart-btn" class="play-btn">PLAY AGAIN</button>
+                </div>
+            </div>
+
+            <!-- Special round indicator -->
+            <div id="special-round-banner" class="special-round-banner"></div>
+        </div>
+
+        <!-- Particle effect container -->
+        <div id="particle-container"></div>
+    </div>
+
+    <script src="game.js"></script>
+</body>
+</html>

@@ -1,877 +1,698 @@
-// Game state
-const gameState = {
-    score: 0,
-    combo: 0,
-    lives: 3,
-    bestScore: localStorage.getItem('buttonLyingBestScore') || 0,
-    round: 0,
-    gameActive: false,
-    buttonClickable: true,
-    soundEnabled: true,
-    playerBehavior: {
-        clickedLargestButton: 0,
-        clickedFirstButton: 0,
-        clickedCenterButton: 0,
-        totalClicks: 0
-    },
-    specialRoundsTriggered: new Set(),
-    unlockedGameKnowsYou: false
+const STORAGE_KEY = 'game-life-1933-save-v1';
+
+const initialStats = {
+  political: 50,
+  economy: 50,
+  military: 30,
+  stability: 50,
+  diplomacy: 50,
 };
 
-// Audio context
-let audioContext;
-const sounds = {};
-
-// Initialize audio context
-function initAudio() {
-    if (!audioContext) {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    }
-}
-
-// Play sound
-function playSound(type) {
-    if (!gameState.soundEnabled || !audioContext) return;
-
-    try {
-        const ctx = audioContext;
-        const now = ctx.currentTime;
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-
-        gain.gain.setValueAtTime(0.3, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
-
-        switch (type) {
-            case 'correct':
-                osc.frequency.setValueAtTime(800, now);
-                osc.frequency.exponentialRampToValueAtTime(1200, now + 0.1);
-                break;
-            case 'wrong':
-                osc.frequency.setValueAtTime(200, now);
-                osc.frequency.exponentialRampToValueAtTime(100, now + 0.2);
-                break;
-            case 'click':
-                osc.frequency.setValueAtTime(600, now);
-                osc.frequency.exponentialRampToValueAtTime(400, now + 0.05);
-                break;
-            case 'special':
-                osc.frequency.setValueAtTime(1000, now);
-                osc.frequency.exponentialRampToValueAtTime(1500, now + 0.3);
-                break;
-        }
-
-        osc.start(now);
-        osc.stop(now + 0.2);
-    } catch (e) {
-        console.log('Audio context error:', e);
-    }
-}
-
-// Create particles
-function createParticles(x, y, color, count = 10) {
-    const container = document.getElementById('particle-container');
-    for (let i = 0; i < count; i++) {
-        const particle = document.createElement('div');
-        particle.className = 'particle';
-        particle.style.left = x + 'px';
-        particle.style.top = y + 'px';
-        particle.style.width = '8px';
-        particle.style.height = '8px';
-        particle.style.background = color;
-        particle.style.borderRadius = '50%';
-        particle.style.boxShadow = `0 0 10px ${color}`;
-
-        const angle = (Math.PI * 2 * i) / count;
-        const velocity = 3 + Math.random() * 3;
-        let vx = Math.cos(angle) * velocity;
-        let vy = Math.sin(angle) * velocity;
-        let life = 1;
-
-        container.appendChild(particle);
-
-        const animate = () => {
-            life -= 0.05;
-            x += vx;
-            y += vy;
-            particle.style.left = x + 'px';
-            particle.style.top = y + 'px';
-            particle.style.opacity = life;
-
-            if (life > 0) {
-                requestAnimationFrame(animate);
-            } else {
-                particle.remove();
-            }
-        };
-        animate();
-    }
-}
-
-// Screen shake
-function screenShake(intensity = 10, duration = 300) {
-    const gameArea = document.getElementById('game-area');
-    const startTime = Date.now();
-
-    const shake = () => {
-        const elapsed = Date.now() - startTime;
-        if (elapsed < duration) {
-            const x = (Math.random() - 0.5) * intensity;
-            const y = (Math.random() - 0.5) * intensity;
-            gameArea.style.transform = `translate(${x}px, ${y}px)`;
-            requestAnimationFrame(shake);
-        } else {
-            gameArea.style.transform = 'translate(0, 0)';
-        }
-    };
-    shake();
-}
-
-// Glitch effect
-function glitchEffect(duration = 200) {
-    const gameArea = document.getElementById('game-area');
-    gameArea.classList.add('glitch');
-    setTimeout(() => {
-        gameArea.classList.remove('glitch');
-    }, duration);
-}
-
-// Invert colors
-function invertScreen(duration = 400) {
-    const gameArea = document.getElementById('game-area');
-    gameArea.classList.add('inverted');
-    setTimeout(() => {
-        gameArea.classList.remove('inverted');
-    }, duration);
-}
-
-// Color utilities
-const colors = [
-    { name: 'RED', hex: '#ff0000' },
-    { name: 'BLUE', hex: '#0000ff' },
-    { name: 'GREEN', hex: '#00ff00' },
-    { name: 'YELLOW', hex: '#ffff00' },
-    { name: 'CYAN', hex: '#00ffff' },
-    { name: 'MAGENTA', hex: '#ff00ff' },
-    { name: 'ORANGE', hex: '#ff8800' },
-    { name: 'PURPLE', hex: '#8800ff' }
+const eventSequence = [
+  {
+    title: 'You have just become Chancellor.',
+    description:
+      'Germany is unstable, exhausted by the political crisis, and deeply uncertain. The old republic is weakening, and the state is waiting to see what kind of government you will build.',
+    options: [
+      {
+        label: 'Focus on consolidating political power',
+        effects: { political: 14, stability: -4, diplomacy: -4, economy: 0, military: 0 },
+        result:
+          'You use the machinery of the state to tighten control, while opponents denounce the government as authoritarian.',
+        days: 17,
+      },
+      {
+        label: 'Focus on the economy',
+        effects: { economy: 12, political: 3, stability: 2, diplomacy: -2, military: -2 },
+        result:
+          'You promise recovery and order, but many fear the move toward state control and rearmament.',
+        days: 14,
+      },
+      {
+        label: 'Focus on foreign relations',
+        effects: { diplomacy: 12, political: -3, stability: 1, economy: 1, military: 0 },
+        result:
+          'You present yourself as a decisive statesman, but domestic rivals continue to test your authority.',
+        days: 20,
+      },
+    ],
+  },
+  {
+    title: 'Reichstag Fire',
+    description:
+      'The German parliament burns. The event is treated as a crisis, and a frightened public looks to you for emergency action.',
+    options: [
+      {
+        label: 'Use the crisis to justify emergency powers',
+        effects: { political: 14, stability: 6, diplomacy: -6, economy: -2, military: 0 },
+        result:
+          'Emergency powers expand the executive. Opponents are suppressed, but civil liberties erode rapidly.',
+        days: 21,
+      },
+      {
+        label: 'Investigate and seek broad political consensus',
+        effects: { political: -4, stability: -3, diplomacy: 4, economy: 2, military: 0 },
+        result:
+          'You look more measured, but your opponents gain room to challenge your authority.',
+        days: 18,
+      },
+      {
+        label: 'Exploit the fire for a wider campaign against enemies of the state',
+        effects: { political: 10, stability: 4, diplomacy: -8, economy: -3, military: 0 },
+        result:
+          'The state pushes harder against political enemies, deepening repression and fear.',
+        days: 19,
+      },
+    ],
+  },
+  {
+    title: 'The Enabling Act',
+    description:
+      'The Reichstag votes for extraordinary legislative powers. The government can now act without normal parliamentary rules for a period of years.',
+    options: [
+      {
+        label: 'Pass the act and centralize state authority',
+        effects: { political: 18, stability: 10, diplomacy: -8, economy: 0, military: 0 },
+        result:
+          'The legal foundations of democratic government are weakened as the executive becomes dominant.',
+        days: 30,
+      },
+      {
+        label: 'Use it carefully and seek stability',
+        effects: { political: 8, stability: 5, diplomacy: 2, economy: 4, military: -2 },
+        result:
+          'The state grows more controlled, but you leave some space for public order and business confidence.',
+        days: 25,
+      },
+      {
+        label: 'Delay and continue the struggle for legitimacy',
+        effects: { political: -6, stability: -5, diplomacy: 5, economy: 2, military: 0 },
+        result:
+          'The political climate becomes more unstable as rivals and moderates resist your commands.',
+        days: 29,
+      },
+    ],
+  },
+  {
+    title: 'Night of the Long Knives',
+    description:
+      'The brutal political purge of opponents inside the Nazi movement and the wider right shocks Germany and reshapes your power base.',
+    options: [
+      {
+        label: 'Crush the SA and eliminate rivals',
+        effects: { political: 18, stability: 2, diplomacy: -7, economy: -3, military: 2 },
+        result:
+          'The Nazi movement is made more obedient and your control is strengthened, but the violence leaves a lasting stain.',
+        days: 45,
+      },
+      {
+        label: 'Moderate the purge and preserve party unity',
+        effects: { political: 5, stability: 4, diplomacy: 2, economy: 2, military: 0 },
+        result:
+          'The regime remains more fragile, but there is less open terror and more internal friction.',
+        days: 40,
+      },
+      {
+        label: 'Proceed with an even harsher campaign against enemies',
+        effects: { political: 12, stability: -4, diplomacy: -9, economy: -4, military: 0 },
+        result:
+          'The violence deepens fear and exposes the regime as increasingly authoritarian and unstable.',
+        days: 50,
+      },
+    ],
+  },
+  {
+    title: 'Rearmament and the Saar',
+    description:
+      'The German economy is pulled into rearmament and public messaging about national recovery. Questions about military expansion and social sacrifice intensify.',
+    options: [
+      {
+        label: 'Push militarization and rearmament',
+        effects: { military: 16, economy: -8, political: 8, stability: -5, diplomacy: -12 },
+        result:
+          'Industry is redirected toward the military, but the country pays a steep economic and diplomatic cost.',
+        days: 90,
+      },
+      {
+        label: 'Balance armaments with domestic recovery',
+        effects: { economy: 8, military: 8, political: 5, stability: 5, diplomacy: 0 },
+        result:
+          'You keep the military growing without overloading the economy, though progress is slower.',
+        days: 80,
+      },
+      {
+        label: 'Stress public order and civil employment first',
+        effects: { economy: 10, stability: 7, military: -5, diplomacy: 4, political: -2 },
+        result:
+          'The population sees some relief, but military modernization slows and confidence in your plans erodes.',
+        days: 75,
+      },
+    ],
+  },
+  {
+    title: 'The Nuremberg Laws',
+    description:
+      'A wider legal framework begins to define Jews as outsiders and restrict their rights, marking a major escalation in state persecution.',
+    options: [
+      {
+        label: 'Expand anti-Jewish law and segregation',
+        effects: { political: 9, stability: 7, diplomacy: -14, economy: -3, military: 0 },
+        result:
+          'The state moves further into racial persecution, deepening exclusion and alienating Germany internationally.',
+        days: 110,
+      },
+      {
+        label: 'Push social control without escalating the laws too far',
+        effects: { political: 4, stability: 3, diplomacy: -5, economy: 2, military: 0 },
+        result:
+          'The regime appears less extreme in public, but persecution continues in a more controlled form.',
+        days: 95,
+      },
+      {
+        label: 'Pause further legal escalation and focus on economic control',
+        effects: { economy: 4, stability: 2, diplomacy: 6, political: -6, military: 0 },
+        result:
+          'You avoid the harshest escalation, but the regime appears less radical and less decisive.',
+        days: 100,
+      },
+    ],
+  },
+  {
+    title: 'Anschluss',
+    description:
+      'Austria is drawn into the orbit of Germany. The issue is explosive, and the broader European powers are watching closely.',
+    options: [
+      {
+        label: 'Pursue annexation',
+        effects: { political: 12, stability: 6, diplomacy: -10, economy: 4, military: 6 },
+        result:
+          'The annexation strengthens your prestige domestically, but it alarms Britain and France.',
+        days: 180,
+      },
+      {
+        label: 'Negotiate a limited accommodation',
+        effects: { political: 3, stability: 3, diplomacy: 7, economy: 2, military: 0 },
+        result:
+          'You gain some diplomatic breathing room while reducing the chance of immediate confrontation.',
+        days: 170,
+      },
+      {
+        label: 'Abandon the demand and refocus on Germany',
+        effects: { political: -7, stability: -3, diplomacy: 8, economy: 1, military: -3 },
+        result:
+          'The move avoids immediate war but is seen as a failure of momentum and resolve.',
+        days: 160,
+      },
+    ],
+  },
+  {
+    title: 'Munich Agreement',
+    description:
+      'The Western powers seek to avert war in Europe by accepting further German demands in Czechoslovakia.',
+    options: [
+      {
+        label: 'Press for a major settlement and public victory',
+        effects: { political: 15, stability: 8, diplomacy: -14, economy: 2, military: 5 },
+        result:
+          'You claim a diplomatic triumph, but the settlement does not settle the underlying tension in Europe.',
+        days: 200,
+      },
+      {
+        label: 'Ask for a partial concession and preserve peace',
+        effects: { political: 5, stability: 4, diplomacy: 8, economy: 2, military: -3 },
+        result:
+          'You reduce the risk of a wider war, though your image as a hardliner is weakened.',
+        days: 190,
+      },
+      {
+        label: 'Push harder and challenge the settlement',
+        effects: { political: 8, stability: -2, diplomacy: -18, economy: -1, military: 8 },
+        result:
+          'The pressure builds toward a more dangerous crisis as diplomacy hardens into confrontation.',
+        days: 210,
+      },
+    ],
+  },
+  {
+    title: 'Czechoslovakia Crumbles',
+    description:
+      'The political fragmentation of Czechoslovakia becomes a strategic opening. Armies on all sides are preparing for war.',
+    options: [
+      {
+        label: 'Take the opportunity and intensify pressure',
+        effects: { military: 12, political: 10, stability: 5, diplomacy: -12, economy: -3 },
+        result:
+          'You gamble on force and prestige, but the diplomatic climate becomes more dangerous.',
+        days: 170,
+      },
+      {
+        label: 'Use pressure diplomatically and avoid a general war',
+        effects: { diplomacy: 8, political: 2, stability: 4, economy: 4, military: -2 },
+        result:
+          'A calmer diplomatic path emerges, but your opponents continue to watch your intentions.',
+        days: 160,
+      },
+      {
+        label: 'Take a maximalist position and risk open conflict',
+        effects: { military: 10, political: 8, stability: -5, diplomacy: -20, economy: -4 },
+        result:
+          'Your ambition rises, but so does the risk that the international system will oppose you.',
+        days: 175,
+      },
+    ],
+  },
+  {
+    title: 'Invasion of Poland',
+    description:
+      'The German army advances into Poland. The war is no longer a distant concern. Every decision now affects the larger European balance.',
+    options: [
+      {
+        label: 'Launch a rapid and ruthless campaign',
+        effects: { military: 18, political: 18, stability: 7, diplomacy: -22, economy: -10 },
+        result:
+          'The war begins with spectacular surprise, but Europe now recognizes the danger of Germany as a continental aggressor.',
+        days: 240,
+      },
+      {
+        label: 'Aim for limited objectives and seek a negotiated settlement',
+        effects: { military: 7, political: 3, stability: 2, diplomacy: 3, economy: 1 },
+        result:
+          'You appear more cautious, but the war remains highly unstable and the public is impatient.',
+        days: 215,
+      },
+      {
+        label: 'Attempt total war without restraint',
+        effects: { military: 15, political: 10, stability: 2, diplomacy: -26, economy: -12 },
+        result:
+          'Your military may dominate the battlefield, but the political cost is enormous and the coalition against you grows.',
+        days: 230,
+      },
+    ],
+  },
+  {
+    title: 'Fall of France',
+    description:
+      'A swift campaign across Western Europe brings dramatic victories. German prestige soars, but the burden of conquest deepens the war.',
+    options: [
+      {
+        label: 'Seize continental dominance and demand total surrender',
+        effects: { military: 16, political: 16, stability: 10, diplomacy: -18, economy: -8 },
+        result:
+          'The regime looks unstoppable, but the broader conflict becomes more total and destructive.',
+        days: 260,
+      },
+      {
+        label: 'Seek a negotiated peace with Britain',
+        effects: { diplomacy: 12, political: 3, stability: 4, economy: 4, military: -4 },
+        result:
+          'A period of relative calm may be possible, but the strategic initiative slips away.',
+        days: 245,
+      },
+      {
+        label: 'Press on through every available resource',
+        effects: { military: 12, political: 8, stability: -2, diplomacy: -22, economy: -12 },
+        result:
+          'The army gains momentum, but the country is pushed toward exhaustion and wider war.',
+        days: 250,
+      },
+    ],
+  },
+  {
+    title: 'Air Battle and Britain',
+    description:
+      'The war on the seas and in the air becomes more difficult. Britain remains defiant and the war is no longer limited to continental Europe.',
+    options: [
+      {
+        label: 'Escalate the air war and threaten invasion',
+        effects: { military: 10, political: 8, stability: -3, diplomacy: -16, economy: -8 },
+        result:
+          'The pressure on Britain is fierce, but the strain on logistics and industry becomes severe.',
+        days: 160,
+      },
+      {
+        label: 'Concentrate on the continent and preserve resources',
+        effects: { economy: 7, military: 5, political: 2, diplomacy: 8, stability: 5 },
+        result:
+          'The risk of overextension is reduced, but the war drags on and the initiative is harder to maintain.',
+        days: 150,
+      },
+      {
+        label: 'Attempt a broader campaign of intimidation',
+        effects: { political: 6, stability: -4, diplomacy: -20, economy: -10, military: 8 },
+        result:
+          'You create fear and pressure, but strategy becomes increasingly dependent on coercion and exhaustion.',
+        days: 170,
+      },
+    ],
+  },
+  {
+    title: 'Operation Barbarossa',
+    description:
+      'The invasion of the Soviet Union begins. The campaign is massive, ambitious, and terrifying in scale. The country is now fighting a war on multiple fronts.',
+    options: [
+      {
+        label: 'Advance with maximum force toward the Soviet heartland',
+        effects: { military: 16, political: 18, stability: 6, diplomacy: -18, economy: -12 },
+        result:
+          'The offensive breaks expectations and brings early gains, but it widens the war beyond what the economy and logistics can sustain.',
+        days: 320,
+      },
+      {
+        label: 'Limit the campaign to strategic objectives',
+        effects: { military: 8, political: 4, stability: 5, diplomacy: 6, economy: 6 },
+        result:
+          'You reduce the risk of strategic overextension, though the Soviet Union remains dangerous and resilient.',
+        days: 300,
+      },
+      {
+        label: 'Rush the offensive without adequate preparation',
+        effects: { military: 12, political: 10, stability: -5, diplomacy: -24, economy: -10 },
+        result:
+          'The army may win temporary ground, but the campaign becomes increasingly unstable and costly.',
+        days: 330,
+      },
+    ],
+  },
+  {
+    title: 'Battle of Stalingrad',
+    description:
+      'The Soviet defense of Stalingrad is one of the decisive turning points of the war. The German army is now under tremendous strain.',
+    options: [
+      {
+        label: 'Keep fighting for the city regardless of cost',
+        effects: { military: 4, political: 8, stability: -8, diplomacy: -8, economy: -12 },
+        result:
+          'The battle becomes a symbol of overreach. The regime refuses to retreat even as the war turns against it.',
+        days: 240,
+      },
+      {
+        label: 'Withdraw and preserve the army',
+        effects: { military: -8, political: -8, stability: 3, diplomacy: 8, economy: 3 },
+        result:
+          'The immediate military loss is painful, but the army survives to fight another year.',
+        days: 220,
+      },
+      {
+        label: 'Shift the army to a wider strategic defense',
+        effects: { military: 3, political: 2, stability: 2, diplomacy: 4, economy: 5 },
+        result:
+          'The war becomes more defensive and less dramatic, but the strategic situation grows more fragile.',
+        days: 230,
+      },
+    ],
+  },
+  {
+    title: 'Allied Invasion and Western Pressure',
+    description:
+      'The western allies establish a second front and the pressure on Germany becomes impossible to ignore. The war cannot be contained to one theater.',
+    options: [
+      {
+        label: 'Massively reinforce the west',
+        effects: { military: 10, political: 7, stability: 5, diplomacy: -9, economy: -9 },
+        result:
+          'You defend the west, but the strain on military and industrial resources becomes severe.',
+        days: 180,
+      },
+      {
+        label: 'Lean on the east and reduce the western commitment',
+        effects: { military: -2, political: -4, stability: -6, diplomacy: -6, economy: 3 },
+        result:
+          'The division of forces creates vulnerability and the regime appears increasingly desperate.',
+        days: 170,
+      },
+      {
+        label: 'Attempt large-scale political intimidation',
+        effects: { political: 5, stability: -4, diplomacy: -15, economy: -6, military: 3 },
+        result:
+          'The state tries to dominate the narrative, but the military and economy are overwhelmed by events.',
+        days: 175,
+      },
+    ],
+  },
+  {
+    title: 'Soviet Advance',
+    description:
+      'The Red Army is now pushing deep into German-controlled territory. The government has to reckon with strategic collapse at home.',
+    options: [
+      {
+        label: 'Fight to the last line and deny the Soviets any breakthrough',
+        effects: { military: 6, political: 7, stability: -10, diplomacy: -7, economy: -12 },
+        result:
+          'You hold the line through exhaustion and terror, but the social and material destruction is massive.',
+        days: 150,
+      },
+      {
+        label: 'Prepare a defensive retreat and preserve leadership',
+        effects: { military: -6, political: 4, stability: 3, diplomacy: 5, economy: 2 },
+        result:
+          'The retreat is less dramatic but more realistic, reducing total destruction at the cost of prestige.',
+        days: 140,
+      },
+      {
+        label: 'Attempt a final catastrophic offensive',
+        effects: { military: 8, political: 9, stability: -12, diplomacy: -20, economy: -14 },
+        result:
+          'The regime tries to force one last decisive action, but strategic collapse is too advanced to reverse.',
+        days: 145,
+      },
+    ],
+  },
+  {
+    title: 'Fall of Berlin',
+    description:
+      'Berlin falls as the Soviet advance reaches the capital. The war is over in every meaningful sense. A final reckoning is approaching.',
+    options: [
+      {
+        label: 'Attempt to continue the fight from outside the capital',
+        effects: { political: -12, stability: -16, diplomacy: -10, economy: -10, military: -18 },
+        result:
+          'The regime fails to maintain order, and opposition grows more decisive by the day.',
+        days: 60,
+      },
+      {
+        label: 'Seek surrender terms and preserve what remains',
+        effects: { political: -10, stability: 2, diplomacy: 12, economy: 2, military: -10 },
+        result:
+          'You accept a collapse in authority, but you avoid the worst escalation of continuing a hopeless war.',
+        days: 50,
+      },
+      {
+        label: 'Try to hold on through terror and command',
+        effects: { political: -14, stability: -18, diplomacy: -16, economy: -15, military: -20 },
+        result:
+          'Authority is broken under the weight of defeat, and the regime fails to contain the collapse.',
+        days: 55,
+      },
+    ],
+  },
 ];
 
-function getRandomColor() {
-    return colors[Math.floor(Math.random() * colors.length)];
+const state = {
+  date: new Date(1933, 0, 30, 8, 0),
+  stats: { ...initialStats },
+  eventIndex: 0,
+  statusText: 'The state waits for your decision.',
+  ending: null,
+};
+
+const elements = {
+  dateLabel: document.getElementById('dateLabel'),
+  timeLabel: document.getElementById('timeLabel'),
+  eventDateLabel: document.getElementById('eventDateLabel'),
+  eventTitle: document.getElementById('eventTitle'),
+  eventDescription: document.getElementById('eventDescription'),
+  choices: document.getElementById('choices'),
+  nextDayBtn: document.getElementById('nextDayBtn'),
+  statusPanel: document.getElementById('statusPanel'),
+  saveBtn: document.getElementById('saveBtn'),
+  loadBtn: document.getElementById('loadBtn'),
+  newGameBtn: document.getElementById('newGameBtn'),
+  politicalPower: document.getElementById('politicalPower'),
+  economyStat: document.getElementById('economyStat'),
+  militaryStat: document.getElementById('militaryStat'),
+  stabilityStat: document.getElementById('stabilityStat'),
+  diplomacyStat: document.getElementById('diplomacyStat'),
+};
+
+function clampStats() {
+  Object.keys(state.stats).forEach((key) => {
+    state.stats[key] = Math.max(0, Math.min(100, state.stats[key]));
+  });
 }
 
-function getColorByName(name) {
-    return colors.find(c => c.name === name);
+function formatDate(date) {
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(date);
 }
 
-// Round data structure
-class Round {
-    constructor() {
-        this.instruction = '';
-        this.correctAnswers = [];
-        this.buttons = [];
-        this.trickType = 'none';
-    }
+function updateHeader() {
+  elements.dateLabel.textContent = formatDate(state.date);
+  elements.timeLabel.textContent = `${String(state.date.getHours()).padStart(2, '0')}:${String(
+    state.date.getMinutes(),
+  ).padStart(2, '0')}`;
+  elements.eventDateLabel.textContent = formatDate(state.date);
+
+  elements.politicalPower.textContent = state.stats.political;
+  elements.economyStat.textContent = state.stats.economy;
+  elements.militaryStat.textContent = state.stats.military;
+  elements.stabilityStat.textContent = state.stats.stability;
+  elements.diplomacyStat.textContent = state.stats.diplomacy;
+
+  elements.statusPanel.textContent = state.statusText;
 }
 
-// Generate rounds based on game progression
-function generateRound(roundNumber) {
-    const round = new Round();
-    const difficulty = Math.floor((roundNumber - 1) / 5);
-    
-    // Determine trick type
-    const tricks = [
-        'lying-text',
-        'reverse-mode',
-        'ignore-message',
-        'moving-buttons',
-        'fake-countdown',
-        'screen-flip',
-        'memory',
-        'obvious-answer',
-        'reverse-psychology',
-        'combo-break'
-    ];
-
-    let trickIndex = Math.floor(Math.random() * Math.min(difficulty + 2, tricks.length));
-    round.trickType = tricks[trickIndex];
-
-    // Generate based on trick
-    switch (round.trickType) {
-        case 'lying-text':
-            return generateLyingTextRound();
-        case 'reverse-mode':
-            return generateReverseModeRound();
-        case 'ignore-message':
-            return generateIgnoreMessageRound();
-        case 'moving-buttons':
-            return generateMovingButtonsRound();
-        case 'fake-countdown':
-            return generateFakeCountdownRound();
-        case 'screen-flip':
-            return generateScreenFlipRound();
-        case 'memory':
-            return generateMemoryRound();
-        case 'obvious-answer':
-            return generateObviousAnswerRound();
-        case 'reverse-psychology':
-            return generateReversePsychologyRound();
-        case 'combo-break':
-            return generateCombBreakRound();
-        default:
-            return generateSimpleRound();
-    }
+function applyEffects(effects) {
+  Object.entries(effects).forEach(([key, value]) => {
+    state.stats[key] = (state.stats[key] || 0) + value;
+  });
+  clampStats();
 }
 
-function generateSimpleRound() {
-    const round = new Round();
-    const color = getRandomColor();
-    round.instruction = `CLICK THE ${color.name} BUTTON`;
-    round.correctAnswers = [color.name];
+function loadEvent() {
+  if (state.eventIndex >= eventSequence.length) {
+    resolveEnding();
+    return;
+  }
 
-    const buttonCount = 3 + Math.floor(Math.random() * 4);
-    const colors_ = [color];
+  const currentEvent = eventSequence[state.eventIndex];
+  elements.eventTitle.textContent = currentEvent.title;
+  elements.eventDescription.textContent = currentEvent.description;
+  elements.choices.innerHTML = '';
 
-    while (colors_.length < buttonCount) {
-        const c = getRandomColor();
-        if (!colors_.find(x => x.name === c.name)) {
-            colors_.push(c);
-        }
-    }
+  currentEvent.options.forEach((option) => {
+    const button = document.createElement('button');
+    button.className = 'choice-button';
+    button.textContent = option.label;
+    button.addEventListener('click', () => chooseOption(option));
+    elements.choices.appendChild(button);
+  });
 
-    colors_.sort(() => Math.random() - 0.5);
-
-    round.buttons = colors_.map(c => ({
-        label: c.name,
-        color: c.hex,
-        colorName: c.name
-    }));
-
-    return round;
+  updateHeader();
 }
 
-function generateLyingTextRound() {
-    const round = new Round();
-    const actualColor = getRandomColor();
-    const labelColor = getRandomColor();
+function chooseOption(option) {
+  if (state.ending) return;
 
-    round.instruction = `CLICK THE ${labelColor.name} BUTTON`;
-    round.correctAnswers = [actualColor.name];
+  applyEffects(option.effects);
+  state.statusText = option.result;
+  state.eventIndex += 1;
+  state.date = new Date(state.date);
+  state.date.setDate(state.date.getDate() + (option.days || 14));
 
-    const buttonCount = 3 + Math.floor(Math.random() * 4);
-    let buttons = [];
+  if (state.eventIndex >= eventSequence.length) {
+    resolveEnding();
+    return;
+  }
 
-    buttons.push({
-        label: labelColor.name,
-        color: actualColor.hex,
-        colorName: actualColor.name
-    });
-
-    let usedColors = [actualColor];
-    while (buttons.length < buttonCount) {
-        const c = getRandomColor();
-        if (!usedColors.find(x => x.name === c.name)) {
-            usedColors.push(c);
-            buttons.push({
-                label: c.name,
-                color: c.hex,
-                colorName: c.name
-            });
-        }
-    }
-
-    buttons.sort(() => Math.random() - 0.5);
-    round.buttons = buttons;
-    return round;
+  loadEvent();
 }
 
-function generateReverseModeRound() {
-    const round = new Round();
-    const excludeColor = getRandomColor();
-    round.instruction = `CLICK EVERYTHING EXCEPT ${excludeColor.name}`;
-    round.correctAnswers = colors.filter(c => c.name !== excludeColor.name).map(c => c.name);
+function resolveEnding() {
+  const { political, economy, military, stability, diplomacy } = state.stats;
 
-    const buttonCount = 3 + Math.floor(Math.random() * 3);
-    let buttons = [];
-    let usedColors = [];
+  let title = 'Historical Collapse';
+  let summary =
+    'The government fails under the strain of war, repression, and exhaustion. Germany collapses in a way that mirrors the devastating consequences of the war.';
 
-    for (let i = 0; i < buttonCount; i++) {
-        const c = getRandomColor();
-        if (!usedColors.find(x => x.name === c.name)) {
-            usedColors.push(c);
-            buttons.push({
-                label: c.name,
-                color: c.hex,
-                colorName: c.name
-            });
-        }
-    }
+  if (military >= 70 && political >= 60 && stability >= 55) {
+    title = 'Alternate Survival of the Regime';
+    summary =
+      'Your regime survives by force, intimidation, and strategic endurance. The state remains in power, though at a terrible cost to Germany and Europe.';
+  } else if (diplomacy >= 65 && economy >= 60 && military >= 45) {
+    title = 'Alternate Diplomatic Outcome';
+    summary =
+      'The regime survives through selective diplomacy and managed coercion, producing a more unstable but not immediately catastrophic course of history.';
+  } else if (military < 40 || stability < 35) {
+    title = 'Early Defeat';
+    summary =
+      'The state loses military momentum and political control. The war becomes a disaster for Germany, and the regime loses the ability to sustain itself.';
+  } else if (political < 45 && stability < 50) {
+    title = 'Early Political Collapse';
+    summary =
+      'The government cannot maintain legitimacy or cohesion and falls under the weight of its own political contradictions and repression.';
+  }
 
-    round.buttons = buttons;
-    return round;
+  state.ending = { title, summary };
+  elements.eventTitle.textContent = title;
+  elements.eventDescription.textContent = summary;
+  elements.choices.innerHTML = '';
+  elements.nextDayBtn.textContent = 'Restart';
+  elements.nextDayBtn.onclick = () => resetGame();
+  updateHeader();
 }
 
-function generateIgnoreMessageRound() {
-    const round = new Round();
-    const color = getRandomColor();
-    round.instruction = `IGNORE THIS MESSAGE\nCLICK THE ${color.name} BUTTON`;
-    round.correctAnswers = [color.name];
+function nextDay() {
+  if (state.ending) {
+    resetGame();
+    return;
+  }
 
-    const buttonCount = 3 + Math.floor(Math.random() * 4);
-    let buttons = [];
-    let usedColors = [color];
-
-    buttons.push({
-        label: color.name,
-        color: color.hex,
-        colorName: color.name
-    });
-
-    while (buttons.length < buttonCount) {
-        const c = getRandomColor();
-        if (!usedColors.find(x => x.name === c.name)) {
-            usedColors.push(c);
-            buttons.push({
-                label: c.name,
-                color: c.hex,
-                colorName: c.name
-            });
-        }
-    }
-
-    buttons.sort(() => Math.random() - 0.5);
-    round.buttons = buttons;
-    return round;
+  state.date.setDate(state.date.getDate() + 1);
+  state.statusText = 'A day passes. The machinery of the state continues without pause.';
+  updateHeader();
 }
 
-function generateMovingButtonsRound() {
-    const round = new Round();
-    const color = getRandomColor();
-    round.instruction = `CLICK THE ${color.name} BUTTON`;
-    round.correctAnswers = [color.name];
-    round.movingButton = true;
-
-    const buttonCount = 3 + Math.floor(Math.random() * 4);
-    let buttons = [];
-    let usedColors = [color];
-
-    buttons.push({
-        label: color.name,
-        color: color.hex,
-        colorName: color.name
-    });
-
-    while (buttons.length < buttonCount) {
-        const c = getRandomColor();
-        if (!usedColors.find(x => x.name === c.name)) {
-            usedColors.push(c);
-            buttons.push({
-                label: c.name,
-                color: c.hex,
-                colorName: c.name
-            });
-        }
-    }
-
-    buttons.sort(() => Math.random() - 0.5);
-    round.buttons = buttons;
-    return round;
+function saveGame() {
+  const payload = {
+    date: state.date.toISOString(),
+    stats: state.stats,
+    eventIndex: state.eventIndex,
+    statusText: state.statusText,
+    ending: state.ending,
+  };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  state.statusText = 'Game saved successfully.';
+  updateHeader();
 }
 
-function generateFakeCountdownRound() {
-    const round = new Round();
-    const color = getRandomColor();
-    round.instruction = `CLICK THE ${color.name} BUTTON\n3... 2... 1...`;
-    round.correctAnswers = [color.name];
+function loadGame() {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) {
+    state.statusText = 'No save file found yet.';
+    updateHeader();
+    return;
+  }
 
-    const buttonCount = 3 + Math.floor(Math.random() * 4);
-    let buttons = [];
-    let usedColors = [color];
-
-    buttons.push({
-        label: color.name,
-        color: color.hex,
-        colorName: color.name
-    });
-
-    while (buttons.length < buttonCount) {
-        const c = getRandomColor();
-        if (!usedColors.find(x => x.name === c.name)) {
-            usedColors.push(c);
-            buttons.push({
-                label: c.name,
-                color: c.hex,
-                colorName: c.name
-            });
-        }
-    }
-
-    buttons.sort(() => Math.random() - 0.5);
-    round.buttons = buttons;
-    return round;
-}
-
-function generateScreenFlipRound() {
-    const round = new Round();
-    const color = getRandomColor();
-    round.instruction = `CLICK THE ${color.name} BUTTON`;
-    round.correctAnswers = [color.name];
-    round.screenFlip = true;
-
-    const buttonCount = 3 + Math.floor(Math.random() * 4);
-    let buttons = [];
-    let usedColors = [color];
-
-    buttons.push({
-        label: color.name,
-        color: color.hex,
-        colorName: color.name
-    });
-
-    while (buttons.length < buttonCount) {
-        const c = getRandomColor();
-        if (!usedColors.find(x => x.name === c.name)) {
-            usedColors.push(c);
-            buttons.push({
-                label: c.name,
-                color: c.hex,
-                colorName: c.name
-            });
-        }
-    }
-
-    buttons.sort(() => Math.random() - 0.5);
-    round.buttons = buttons;
-    return round;
-}
-
-function generateMemoryRound() {
-    const round = new Round();
-    const color = getRandomColor();
-    round.instruction = `REMEMBER THE COLOR`;
-    round.correctAnswers = [color.name];
-    round.memory = true;
-    round.memoryColor = color;
-
-    const buttonCount = 4 + Math.floor(Math.random() * 3);
-    let buttons = [];
-    let usedColors = [color];
-
-    while (buttons.length < buttonCount) {
-        const c = getRandomColor();
-        if (!usedColors.find(x => x.name === c.name)) {
-            usedColors.push(c);
-            buttons.push({
-                label: c.name,
-                color: c.hex,
-                colorName: c.name
-            });
-        }
-    }
-
-    buttons.sort(() => Math.random() - 0.5);
-    round.buttons = buttons;
-    return round;
-}
-
-function generateObviousAnswerRound() {
-    const round = new Round();
-    const correctColor = getRandomColor();
-    round.instruction = `CLICK THE ${correctColor.name} BUTTON`;
-    round.correctAnswers = [correctColor.name];
-
-    const buttonCount = 3 + Math.floor(Math.random() * 3);
-    let buttons = [];
-
-    buttons.push({
-        label: 'CLICK ME',
-        color: '#ffff00',
-        colorName: 'CLICK_ME',
-        size: 'large'
-    });
-
-    buttons.push({
-        label: correctColor.name,
-        color: correctColor.hex,
-        colorName: correctColor.name,
-        size: 'normal'
-    });
-
-    let usedColors = [correctColor];
-    while (buttons.length < buttonCount) {
-        const c = getRandomColor();
-        if (!usedColors.find(x => x.name === c.name)) {
-            usedColors.push(c);
-            buttons.push({
-                label: c.name,
-                color: c.hex,
-                colorName: c.name,
-                size: 'normal'
-            });
-        }
-    }
-
-    buttons.sort(() => Math.random() - 0.5);
-    round.buttons = buttons;
-    return round;
-}
-
-function generateReversePsychologyRound() {
-    const round = new Round();
-    const correctColor = getRandomColor();
-    round.instruction = `DO NOT CLICK THE ${correctColor.name} BUTTON`;
-    round.correctAnswers = [correctColor.name];
-
-    const buttonCount = 3 + Math.floor(Math.random() * 4);
-    let buttons = [];
-    let usedColors = [correctColor];
-
-    buttons.push({
-        label: correctColor.name,
-        color: correctColor.hex,
-        colorName: correctColor.name
-    });
-
-    while (buttons.length < buttonCount) {
-        const c = getRandomColor();
-        if (!usedColors.find(x => x.name === c.name)) {
-            usedColors.push(c);
-            buttons.push({
-                label: c.name,
-                color: c.hex,
-                colorName: c.name
-            });
-        }
-    }
-
-    buttons.sort(() => Math.random() - 0.5);
-    round.buttons = buttons;
-    return round;
-}
-
-function generateCombBreakRound() {
-    const round = new Round();
-    const color = getRandomColor();
-    round.instruction = `CLICK THE ${color.name} BUTTON`;
-    round.correctAnswers = [color.name];
-
-    const buttonCount = 4 + Math.floor(Math.random() * 3);
-    let buttons = [];
-    let usedColors = [color];
-
-    buttons.push({
-        label: color.name,
-        color: color.hex,
-        colorName: color.name
-    });
-
-    while (buttons.length < buttonCount) {
-        const c = getRandomColor();
-        if (!usedColors.find(x => x.name === c.name)) {
-            usedColors.push(c);
-            buttons.push({
-                label: c.name,
-                color: c.hex,
-                colorName: c.name
-            });
-        }
-    }
-
-    buttons.sort(() => Math.random() - 0.5);
-    round.buttons = buttons;
-    return round;
-}
-
-function renderRound(round) {
-    const instruction = document.getElementById('instruction');
-    const container = document.getElementById('buttons-container');
-    const roundNum = document.getElementById('round-number');
-
-    roundNum.textContent = `Round ${gameState.round}`;
-    instruction.textContent = round.instruction;
-    container.innerHTML = '';
-
-    if (round.memory) {
-        const flashColor = round.memoryColor.hex;
-        container.style.background = flashColor;
-        setTimeout(() => {
-            container.style.background = '';
-        }, 800);
-    }
-
-    if (round.screenFlip) {
-        setTimeout(() => {
-            invertScreen(300);
-        }, 500);
-    }
-
-    round.buttons.forEach((btn, index) => {
-        const button = document.createElement('button');
-        button.className = 'game-btn';
-        button.textContent = btn.label;
-        button.style.background = btn.color;
-        button.style.color = getLuminance(btn.color) > 128 ? '#000' : '#fff';
-
-        if (btn.size === 'large') {
-            button.style.padding = '40px 80px';
-            button.style.fontSize = '28px';
-        }
-
-        button.dataset.colorName = btn.colorName;
-        button.dataset.index = index;
-
-        button.addEventListener('click', (e) => handleButtonClick(e, round));
-
-        if (round.movingButton && btn.colorName === round.correctAnswers[0]) {
-            animateMovingButton(button);
-        }
-
-        container.appendChild(button);
-    });
-}
-
-function animateMovingButton(button) {
-    const startTime = Date.now();
-    const duration = 3000;
-
-    const animate = () => {
-        const elapsed = Date.now() - startTime;
-        if (elapsed < duration) {
-            const progress = elapsed / duration;
-            const angle = progress * Math.PI * 4;
-            const distance = 50 * Math.sin(angle);
-            
-            button.style.transform = `translate(${distance}px, ${Math.sin(angle * 1.5) * 20}px)`;
-            requestAnimationFrame(animate);
-        }
-    };
-    animate();
-}
-
-function getLuminance(hexColor) {
-    const hex = hexColor.replace('#', '');
-    const r = parseInt(hex.substr(0, 2), 16);
-    const g = parseInt(hex.substr(2, 2), 16);
-    const b = parseInt(hex.substr(4, 2), 16);
-    return (r * 299 + g * 587 + b * 114) / 1000;
-}
-
-function handleButtonClick(event, round) {
-    if (!gameState.buttonClickable) return;
-
-    gameState.buttonClickable = false;
-    playSound('click');
-
-    const button = event.target;
-    const clickedColor = button.dataset.colorName;
-
-    gameState.playerBehavior.totalClicks++;
-
-    const isCorrect = round.correctAnswers.includes(clickedColor);
-
-    if (isCorrect) {
-        handleCorrectAnswer(button, clickedColor);
+  try {
+    const saved = JSON.parse(raw);
+    state.date = new Date(saved.date);
+    state.stats = { ...initialStats, ...saved.stats };
+    state.eventIndex = saved.eventIndex || 0;
+    state.statusText = saved.statusText || 'Save loaded.';
+    state.ending = saved.ending || null;
+    elements.nextDayBtn.textContent = 'Next Day';
+    elements.nextDayBtn.onclick = nextDay;
+    if (state.eventIndex >= eventSequence.length || state.ending) {
+      resolveEnding();
     } else {
-        handleWrongAnswer(button, clickedColor);
+      loadEvent();
     }
+  } catch (error) {
+    state.statusText = 'The save file could not be loaded.';
+    updateHeader();
+  }
 }
 
-function handleCorrectAnswer(button, clickedColor) {
-    playSound('correct');
-    button.classList.add('correct');
-
-    const clickX = button.offsetLeft + button.offsetWidth / 2;
-    const clickY = button.offsetTop + button.offsetHeight / 2;
-    const buttonColor = button.style.background;
-
-    createParticles(clickX, clickY, buttonColor, 15);
-    screenShake(5, 200);
-
-    gameState.score++;
-    gameState.combo++;
-
-    const feedback = document.getElementById('feedback');
-    feedback.className = 'feedback correct';
-    feedback.textContent = `+1 POINT! COMBO: ${gameState.combo}`;
-    feedback.style.display = 'block';
-
-    setTimeout(() => {
-        feedback.style.display = 'none';
-    }, 600);
-
-    updateDisplay();
-    checkSpecialRound();
-
-    if (gameState.score === 50 && !gameState.unlockedGameKnowsYou) {
-        gameState.unlockedGameKnowsYou = true;
-        showSpecialBanner('THE GAME KNOWS YOU');
-        playSound('special');
-    }
-
-    setTimeout(() => {
-        gameState.buttonClickable = true;
-        nextRound();
-    }, 800);
+function resetGame() {
+  state.date = new Date(1933, 0, 30, 8, 0);
+  state.stats = { ...initialStats };
+  state.eventIndex = 0;
+  state.statusText = 'The state waits for your decision.';
+  state.ending = null;
+  elements.nextDayBtn.textContent = 'Next Day';
+  elements.nextDayBtn.onclick = nextDay;
+  loadEvent();
 }
 
-function handleWrongAnswer(button, clickedColor) {
-    playSound('wrong');
-    button.classList.add('wrong');
-
-    gameState.lives--;
-    gameState.combo = 0;
-
-    const feedback = document.getElementById('feedback');
-    feedback.className = 'feedback wrong';
-    feedback.textContent = 'WRONG! -1 LIFE';
-    feedback.style.display = 'block';
-
-    setTimeout(() => {
-        feedback.style.display = 'none';
-    }, 600);
-
-    updateDisplay();
-
-    if (gameState.lives <= 0) {
-        setTimeout(() => {
-            endGame();
-        }, 800);
-    } else {
-        setTimeout(() => {
-            gameState.buttonClickable = true;
-            nextRound();
-        }, 800);
-    }
+function setup() {
+  elements.nextDayBtn.onclick = nextDay;
+  elements.saveBtn.onclick = saveGame;
+  elements.loadBtn.onclick = loadGame;
+  elements.newGameBtn.onclick = resetGame;
+  loadEvent();
 }
 
-function checkSpecialRound() {
-    const specialRoundTrigger = 10;
-    const roundsCompleted = gameState.score;
-
-    if (roundsCompleted > 0 && roundsCompleted % specialRoundTrigger === 0) {
-        const specialTypes = ['MEMORY', 'SPEED', 'SILENT', 'CHAOS'];
-        const specialType = specialTypes[Math.floor(roundsCompleted / specialRoundTrigger) % specialTypes.length];
-
-        if (!gameState.specialRoundsTriggered.has(roundsCompleted)) {
-            gameState.specialRoundsTriggered.add(roundsCompleted);
-            showSpecialBanner(`⚡ ${specialType} ROUND ⚡`);
-            playSound('special');
-        }
-    }
-}
-
-function showSpecialBanner(text) {
-    const banner = document.getElementById('special-round-banner');
-    banner.textContent = text;
-    banner.style.opacity = '0';
-    banner.style.animation = 'none';
-    
-    setTimeout(() => {
-        banner.style.animation = 'bannerPop 0.8s ease forwards';
-    }, 10);
-}
-
-function nextRound() {
-    gameState.round++;
-    const round = generateRound(gameState.round);
-    renderRound(round);
-    startRoundTimer();
-}
-
-function startRoundTimer() {
-    const timerBar = document.getElementById('timer-bar');
-    timerBar.style.animation = 'none';
-
-    void timerBar.offsetWidth;
-
-    const timeLimit = gameState.unlockedGameKnowsYou ? 2000 : 3000;
-    timerBar.style.animation = `timerCountdown ${timeLimit / 1000}s linear forwards`;
-
-    setTimeout(() => {
-        if (gameState.gameActive && gameState.buttonClickable) {
-            gameState.lives--;
-            gameState.combo = 0;
-            updateDisplay();
-
-            if (gameState.lives <= 0) {
-                endGame();
-            } else {
-                gameState.buttonClickable = true;
-                nextRound();
-            }
-        }
-    }, timeLimit);
-}
-
-function updateDisplay() {
-    document.getElementById('score').textContent = gameState.score;
-    document.getElementById('combo').textContent = gameState.combo;
-    document.getElementById('lives').textContent = gameState.lives;
-    document.getElementById('best-score').textContent = Math.max(gameState.bestScore, gameState.score);
-}
-
-function endGame() {
-    gameState.gameActive = false;
-    playSound('wrong');
-
-    if (gameState.score > gameState.bestScore) {
-        gameState.bestScore = gameState.score;
-        localStorage.setItem('buttonLyingBestScore', gameState.bestScore);
-    }
-
-    showScreen('gameover-screen');
-    document.getElementById('final-score').textContent = gameState.score;
-    document.getElementById('gameover-best').textContent = gameState.bestScore;
-    document.getElementById('final-combo').textContent = gameState.combo;
-}
-
-function showScreen(screenId) {
-    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-    document.getElementById(screenId).classList.add('active');
-}
-
-function startGame() {
-    gameState.score = 0;
-    gameState.combo = 0;
-    gameState.lives = 3;
-    gameState.round = 0;
-    gameState.gameActive = true;
-    gameState.buttonClickable = true;
-    gameState.playerBehavior = {
-        clickedLargestButton: 0,
-        clickedFirstButton: 0,
-        clickedCenterButton: 0,
-        totalClicks: 0
-    };
-    gameState.specialRoundsTriggered = new Set();
-
-    showScreen('game-screen');
-    updateDisplay();
-
-    nextRound();
-}
-
-document.getElementById('start-btn').addEventListener('click', () => {
-    initAudio();
-    startGame();
-});
-
-document.getElementById('restart-btn').addEventListener('click', () => {
-    initAudio();
-    startGame();
-});
-
-document.getElementById('mute-btn').addEventListener('click', () => {
-    gameState.soundEnabled = !gameState.soundEnabled;
-    const btn = document.getElementById('mute-btn');
-    btn.textContent = gameState.soundEnabled ? '🔊' : '🔇';
-});
-
-window.addEventListener('load', () => {
-    gameState.bestScore = localStorage.getItem('buttonLyingBestScore') || 0;
-    updateDisplay();
-});
+setup();
